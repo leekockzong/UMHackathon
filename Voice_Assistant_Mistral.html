@@ -1,0 +1,207 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>🎤 Voice Assistant with Mistral</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Segoe UI', sans-serif;
+      background: linear-gradient(to right, #2c3e50, #4ca1af);
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+    }
+    .card {
+      background-color: rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 40px;
+      text-align: center;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+      backdrop-filter: blur(10px);
+      max-width: 600px;
+      width: 90%;
+    }
+    h1 {
+      font-size: 2.5rem;
+      margin-bottom: 1rem;
+    }
+    button {
+      background: #ffffff20;
+      border: 2px solid white;
+      padding: 15px 30px;
+      font-size: 1.2rem;
+      color: white;
+      border-radius: 50px;
+      cursor: pointer;
+      margin: 10px;
+      transition: 0.3s ease;
+    }
+    button:hover {
+      background: white;
+      color: #2c3e50;
+    }
+    .footer {
+      margin-top: 40px;
+      font-size: 0.9rem;
+      color: #dddddd;
+    }
+    .chat-box {
+      background: rgba(255, 255, 255, 0.1);
+      max-height: 200px;
+      overflow-y: auto;
+      padding: 15px;
+      margin-top: 20px;
+      text-align: left;
+      border-radius: 10px;
+      font-size: 0.95rem;
+    }
+    .chat-line {
+      margin-bottom: 8px;
+    }
+    .wave {
+      height: 6px;
+      width: 100px;
+      background: white;
+      margin: 10px auto;
+      border-radius: 20px;
+      animation: pulse 1s infinite ease-in-out;
+      opacity: 0.5;
+    }
+    @keyframes pulse {
+      0% { transform: scaleX(1); opacity: 0.4; }
+      50% { transform: scaleX(1.5); opacity: 1; }
+      100% { transform: scaleX(1); opacity: 0.4; }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🎤 Talk to Your Assistant</h1>
+    <label for="lang">🈯 Language: </label>
+    <select id="lang" onchange="switchLanguage()">
+      <option value="en-MY">English (MY)</option>
+      <option value="ms-MY">Malay</option>
+    </select>
+    <button onclick="startListening()">Start Talking</button>
+    <p id="status"></p>
+    <div class="wave" id="wave" style="display:none"></div>
+    <div class="chat-box" id="chatBox"></div>
+  </div>
+  <div class="footer">AI powered by Ollama + Mistral</div>
+
+  <script>
+function startListening() {
+  document.getElementById("status").textContent = "🎙️ Listening...";
+  document.getElementById("wave").style.display = "block";
+  recognition.start();
+  setTimeout(() => {
+    if (document.getElementById("status").textContent.includes("Listening")) {
+      document.getElementById("status").textContent = "⚠️ Timeout – no voice detected.";
+      recognition.stop();
+    }
+  }, 8000);
+}
+
+const dialectMap = {
+  "jom makan": "I want to stop for food",
+  "jalan jam": "Is there traffic ahead?",
+  "cepat sikit": "Please go faster",
+  "tolak job": "Decline the current order",
+  "ambil job": "Accept the job",
+  "check earning": "How much did I earn today?"
+};
+
+var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SpeechRecognition) {
+  alert("Sorry, your browser does not support speech recognition.");
+}
+
+var recognition = new SpeechRecognition();
+recognition.lang = 'en-MY';
+recognition.interimResults = false;
+recognition.maxAlternatives = 1;
+
+function switchLanguage() {
+  const lang = document.getElementById("lang").value;
+  recognition.lang = lang;
+  document.getElementById("status").textContent = `🌐 Language switched to ${lang}`;
+}
+
+recognition.onend = () => {
+  document.getElementById("wave").style.display = "none";
+};
+
+recognition.onspeechend = () => {
+  recognition.stop();
+};
+
+function appendToChat(role, text) {
+  const chatBox = document.getElementById("chatBox");
+  const line = document.createElement("div");
+  line.className = "chat-line";
+  line.textContent = `${role === 'user' ? '👤 You' : '🤖 AI'}: ${text}`;
+  chatBox.appendChild(line);
+  chatBox.scrollTop = chatBox.scrollHeight;
+}
+
+recognition.onresult = async function(event) {
+  var transcript = event.results[0][0].transcript.toLowerCase();
+  const mapped = dialectMap[transcript] || transcript;
+
+  document.getElementById("status").textContent = "🗣️ You said: " + transcript;
+  appendToChat('user', transcript);
+
+  try {
+    const response = await fetch('http://localhost:11434/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'mistral',
+        prompt: `Only answer the question below. No explanation. Just return the final answer in one sentence:\n${mapped}`,
+        stream: false
+      })
+    });
+
+    const data = await response.json();
+    if (data.response) {
+      let reply = data.response.trim();
+      document.getElementById("status").textContent = "🤖 AI says: " + reply;
+      appendToChat('ai', reply);
+
+      const utterance = new SpeechSynthesisUtterance(reply);
+      const selectedLang = document.getElementById("lang").value;
+      const voices = speechSynthesis.getVoices();
+      utterance.voice = voices.find(v => v.lang === selectedLang) || voices.find(v => v.lang.startsWith(selectedLang.split('-')[0])) || null;
+
+      speechSynthesis.speak(utterance);
+    } else {
+      document.getElementById("status").textContent = "⚠️ No response from AI";
+    }
+  } catch (err) {
+    document.getElementById("status").textContent = 'Fetch error: ' + err.message;
+  }
+};
+
+recognition.onerror = function(event) {
+  let message = 'Recognition error: ' + event.error;
+  if (event.error === 'no-speech') {
+    message += " – No voice detected. Please speak clearly near the mic.";
+  } else if (event.error === 'audio-capture') {
+    message += " – Mic not detected. Check connection and permissions.";
+  } else if (event.error === 'not-allowed') {
+    message += " – Mic access denied. Please allow permissions.";
+  }
+  document.getElementById("status").textContent = message;
+};
+
+speechSynthesis.onvoiceschanged = () => speechSynthesis.getVoices();
+  </script>
+</body>
+</html>
